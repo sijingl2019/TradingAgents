@@ -1,3 +1,4 @@
+import os
 from typing import Optional
 
 from .base_client import BaseLLMClient
@@ -6,6 +7,11 @@ from .base_client import BaseLLMClient
 _OPENAI_COMPATIBLE = (
     "openai", "xai", "deepseek", "qwen", "glm", "ollama", "openrouter",
 )
+
+# Providers that use the Anthropic-compatible API
+_ANTHROPIC_COMPAT_CONFIG = {
+    "minimax": ("https://api.minimaxi.com/anthropic", "MINIMAX_API_KEY"),
+}
 
 
 def create_llm_client(
@@ -41,6 +47,15 @@ def create_llm_client(
     if provider_lower == "anthropic":
         from .anthropic_client import AnthropicClient
         return AnthropicClient(model, base_url, **kwargs)
+
+    if provider_lower in _ANTHROPIC_COMPAT_CONFIG:
+        from .anthropic_client import AnthropicClient
+        default_url, api_key_env = _ANTHROPIC_COMPAT_CONFIG[provider_lower]
+        resolved_url = base_url or default_url
+        api_key = os.environ.get(api_key_env)
+        if api_key:
+            kwargs.setdefault("api_key", api_key)
+        return AnthropicClient(model, resolved_url, **kwargs)
 
     if provider_lower == "google":
         from .google_client import GoogleClient
