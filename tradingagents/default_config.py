@@ -2,6 +2,12 @@ import os
 
 _TRADINGAGENTS_HOME = os.path.join(os.path.expanduser("~"), ".tradingagents")
 
+# STOCK_SOURCE selects the default data vendor for all categories.
+# "akshare" (default): CN/HK stocks use AKShare; US/other fall back to yfinance.
+# "yfinance": use yfinance for all markets (original behaviour).
+_STOCK_SOURCE = os.environ.get("STOCK_SOURCE", "akshare").lower()
+_DEFAULT_STOCK_VENDOR = _STOCK_SOURCE if _STOCK_SOURCE in ("akshare", "yfinance") else "akshare"
+
 DEFAULT_CONFIG = {
     "project_dir": os.path.abspath(os.path.join(os.path.dirname(__file__), ".")),
     "results_dir": os.getenv("TRADINGAGENTS_RESULTS_DIR", os.path.join(_TRADINGAGENTS_HOME, "logs")),
@@ -35,13 +41,13 @@ DEFAULT_CONFIG = {
     "max_debate_rounds": 1,
     "max_risk_discuss_rounds": 1,
     "max_recur_limit": 100,
-    # Data vendor configuration
-    # Category-level configuration (default for all tools in category)
+    # Data vendor configuration — controlled by STOCK_SOURCE env var (default: akshare).
+    # Options per category: akshare, yfinance, alpha_vantage
     "data_vendors": {
-        "core_stock_apis": "yfinance",       # Options: alpha_vantage, yfinance
-        "technical_indicators": "yfinance",  # Options: alpha_vantage, yfinance
-        "fundamental_data": "yfinance",      # Options: alpha_vantage, yfinance
-        "news_data": "yfinance",             # Options: alpha_vantage, yfinance
+        "core_stock_apis": _DEFAULT_STOCK_VENDOR,
+        "technical_indicators": _DEFAULT_STOCK_VENDOR,
+        "fundamental_data": _DEFAULT_STOCK_VENDOR,
+        "news_data": _DEFAULT_STOCK_VENDOR,
     },
     # Tool-level configuration (takes precedence over category-level)
     "tool_vendors": {

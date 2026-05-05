@@ -192,31 +192,48 @@ class TradingAgentsGraph:
     ) -> Tuple[Optional[float], Optional[float], Optional[int]]:
         """Fetch raw and alpha return for ticker over holding_days from trade_date.
 
+        Routes to AKShare for CN/HK stocks, yfinance for US/other.
+        Benchmark: CSI 300 for CN A-shares, ^HSI for HK, SPY for US.
+
         Returns (raw_return, alpha_return, actual_holding_days) or
-        (None, None, None) if price data is unavailable (too recent, delisted,
-        or network error).
+        (None, None, None) if price data is unavailable.
         """
+        from tradingagents.dataflows.ak_share import (
+            _detect_market, fetch_price_history,
+        )
         try:
             start = datetime.strptime(trade_date, "%Y-%m-%d")
-            end = start + timedelta(days=holding_days + 7)  # buffer for weekends/holidays
+            end = start + timedelta(days=holding_days + 7)
             end_str = end.strftime("%Y-%m-%d")
 
-            stock = yf.Ticker(ticker).history(start=trade_date, end=end_str)
-            spy = yf.Ticker("SPY").history(start=trade_date, end=end_str)
+            stock_source = os.environ.get("STOCK_SOURCE", "akshare").lower()
+            market = _detect_market(ticker)
+            use_akshare = stock_source == "akshare" and market in ("cn", "hk")
 
-            if len(stock) < 2 or len(spy) < 2:
+            if use_akshare:
+                stock = fetch_price_history(ticker, trade_date, end_str)
+                # CN benchmark: CSI 300 (000300.SS); HK benchmark: ^HSI via yfinance
+                bm_ticker = "000300.SS" if market == "cn" else "^HSI"
+                benchmark = fetch_price_history(bm_ticker, trade_date, end_str)
+            else:
+                _stock_df = yf.Ticker(ticker).history(start=trade_date, end=end_str)
+                _spy_df = yf.Ticker("SPY").history(start=trade_date, end=end_str)
+                stock = _stock_df.reset_index()[["Date", "Close"]] if not _stock_df.empty else None
+                benchmark = _spy_df.reset_index()[["Date", "Close"]] if not _spy_df.empty else None
+
+            if stock is None or benchmark is None or len(stock) < 2 or len(benchmark) < 2:
                 return None, None, None
 
-            actual_days = min(holding_days, len(stock) - 1, len(spy) - 1)
+            actual_days = min(holding_days, len(stock) - 1, len(benchmark) - 1)
             raw = float(
                 (stock["Close"].iloc[actual_days] - stock["Close"].iloc[0])
                 / stock["Close"].iloc[0]
             )
-            spy_ret = float(
-                (spy["Close"].iloc[actual_days] - spy["Close"].iloc[0])
-                / spy["Close"].iloc[0]
+            bm_ret = float(
+                (benchmark["Close"].iloc[actual_days] - benchmark["Close"].iloc[0])
+                / benchmark["Close"].iloc[0]
             )
-            alpha = raw - spy_ret
+            alpha = raw - bm_ret
             return raw, alpha, actual_days
         except Exception as e:
             logger.warning(
