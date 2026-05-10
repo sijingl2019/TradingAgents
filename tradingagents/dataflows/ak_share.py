@@ -1,7 +1,8 @@
 """AKShare-based stock data fetching.
 
 CN A-shares and HK stocks use AKShare APIs.
-US / other markets fall back to yfinance automatically.
+US stocks (suffix .US) fall back to yfinance.
+Bare symbols with no known suffix default to CN.
 """
 
 import os
@@ -19,13 +20,15 @@ logger = logging.getLogger(__name__)
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _detect_market(symbol: str) -> str:
-    """Return 'cn', 'hk', or 'us' (covers all non-CN/HK markets)."""
+    """Return 'cn', 'hk', or 'us'. Bare symbols (no known suffix) default to CN."""
     s = symbol.upper().strip()
     if s.endswith(('.SS', '.SH', '.SZ')):
         return 'cn'
     if s.endswith('.HK'):
         return 'hk'
-    return 'us'
+    if s.endswith('.US'):
+        return 'us'
+    return 'cn'
 
 
 def _to_ak_cn_symbol(symbol: str) -> str:
@@ -40,6 +43,12 @@ def _to_ak_hk_symbol(symbol: str) -> str:
     """'0700.HK' → '00700' (5-digit, zero-padded)."""
     code = symbol.upper().replace('.HK', '')
     return code.zfill(5)
+
+
+def _to_yf_symbol(symbol: str) -> str:
+    """Strip .US suffix before passing to yfinance (yfinance uses bare US tickers)."""
+    s = symbol.upper().strip()
+    return s[:-3] if s.endswith('.US') else s
 
 
 def _ymd(date_str: str) -> str:
@@ -105,7 +114,7 @@ def get_akshare_data_online(
             data = _fetch_hk_ohlcv(_to_ak_hk_symbol(symbol), _ymd(start_date), _ymd(end_date))
         else:
             from .y_finance import get_YFin_data_online
-            return get_YFin_data_online(symbol, start_date, end_date)
+            return get_YFin_data_online(_to_yf_symbol(symbol), start_date, end_date)
 
         if data is None or data.empty:
             return f"No data found for symbol '{symbol}' between {start_date} and {end_date}"
@@ -124,7 +133,7 @@ def get_akshare_data_online(
     except Exception as e:
         logger.warning("AKShare OHLCV failed for %s: %s — falling back to yfinance", symbol, e)
         from .y_finance import get_YFin_data_online
-        return get_YFin_data_online(symbol, start_date, end_date)
+        return get_YFin_data_online(_to_yf_symbol(symbol), start_date, end_date)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -142,7 +151,7 @@ def load_ohlcv_akshare(symbol: str, curr_date: str) -> pd.DataFrame:
 
     if market == 'us':
         from .stockstats_utils import _load_ohlcv_yfinance
-        return _load_ohlcv_yfinance(symbol, curr_date)
+        return _load_ohlcv_yfinance(_to_yf_symbol(symbol), curr_date)
 
     config = get_config()
     curr_date_dt = pd.to_datetime(curr_date)
@@ -169,7 +178,7 @@ def load_ohlcv_akshare(symbol: str, curr_date: str) -> pd.DataFrame:
         except Exception as e:
             logger.warning("AKShare OHLCV cache fill failed for %s: %s — using yfinance", symbol, e)
             from .stockstats_utils import _load_ohlcv_yfinance
-            return _load_ohlcv_yfinance(symbol, curr_date)
+            return _load_ohlcv_yfinance(_to_yf_symbol(symbol), curr_date)
 
     from .stockstats_utils import _clean_dataframe
     data = _clean_dataframe(data)
@@ -258,7 +267,7 @@ def get_akshare_fundamentals(
 
     if market not in ('cn', 'hk'):
         from .y_finance import get_fundamentals as _yf_fundamentals
-        return _yf_fundamentals(ticker, curr_date)
+        return _yf_fundamentals(_to_yf_symbol(ticker), curr_date)
 
     if market == 'hk':
         # AKShare HK fundamentals coverage is limited; yfinance is more complete
@@ -314,7 +323,7 @@ def get_akshare_fundamentals(
     except Exception as e:
         logger.warning("AKShare fundamentals failed for %s: %s — using yfinance", ticker, e)
         from .y_finance import get_fundamentals as _yf_fundamentals
-        return _yf_fundamentals(ticker, curr_date)
+        return _yf_fundamentals(_to_yf_symbol(ticker), curr_date)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -329,7 +338,7 @@ def get_akshare_balance_sheet(
     market = _detect_market(ticker)
     if market != 'cn':
         from .y_finance import get_balance_sheet as _yf_bs
-        return _yf_bs(ticker, freq, curr_date)
+        return _yf_bs(_to_yf_symbol(ticker), freq, curr_date)
 
     try:
         import akshare as ak
@@ -342,7 +351,7 @@ def get_akshare_balance_sheet(
     except Exception as e:
         logger.warning("AKShare balance sheet failed for %s: %s — using yfinance", ticker, e)
         from .y_finance import get_balance_sheet as _yf_bs
-        return _yf_bs(ticker, freq, curr_date)
+        return _yf_bs(_to_yf_symbol(ticker), freq, curr_date)
 
 
 def get_akshare_cashflow(
@@ -353,7 +362,7 @@ def get_akshare_cashflow(
     market = _detect_market(ticker)
     if market != 'cn':
         from .y_finance import get_cashflow as _yf_cf
-        return _yf_cf(ticker, freq, curr_date)
+        return _yf_cf(_to_yf_symbol(ticker), freq, curr_date)
 
     try:
         import akshare as ak
@@ -366,7 +375,7 @@ def get_akshare_cashflow(
     except Exception as e:
         logger.warning("AKShare cashflow failed for %s: %s — using yfinance", ticker, e)
         from .y_finance import get_cashflow as _yf_cf
-        return _yf_cf(ticker, freq, curr_date)
+        return _yf_cf(_to_yf_symbol(ticker), freq, curr_date)
 
 
 def get_akshare_income_statement(
@@ -377,7 +386,7 @@ def get_akshare_income_statement(
     market = _detect_market(ticker)
     if market != 'cn':
         from .y_finance import get_income_statement as _yf_is
-        return _yf_is(ticker, freq, curr_date)
+        return _yf_is(_to_yf_symbol(ticker), freq, curr_date)
 
     try:
         import akshare as ak
@@ -390,7 +399,7 @@ def get_akshare_income_statement(
     except Exception as e:
         logger.warning("AKShare income statement failed for %s: %s — using yfinance", ticker, e)
         from .y_finance import get_income_statement as _yf_is
-        return _yf_is(ticker, freq, curr_date)
+        return _yf_is(_to_yf_symbol(ticker), freq, curr_date)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -407,7 +416,7 @@ def get_news_akshare(
 
     if market not in ('cn', 'hk'):
         from .yfinance_news import get_news_yfinance
-        return get_news_yfinance(ticker, start_date, end_date)
+        return get_news_yfinance(_to_yf_symbol(ticker), start_date, end_date)
 
     try:
         import akshare as ak
@@ -460,7 +469,7 @@ def get_news_akshare(
     except Exception as e:
         logger.warning("AKShare news failed for %s: %s — using yfinance", ticker, e)
         from .yfinance_news import get_news_yfinance
-        return get_news_yfinance(ticker, start_date, end_date)
+        return get_news_yfinance(_to_yf_symbol(ticker), start_date, end_date)
 
 
 def get_global_news_akshare(
@@ -533,7 +542,7 @@ def get_akshare_insider_transactions(
 
     if market != 'cn':
         from .y_finance import get_insider_transactions as _yf_insider
-        return _yf_insider(ticker)
+        return _yf_insider(_to_yf_symbol(ticker))
 
     try:
         import akshare as ak
@@ -554,7 +563,7 @@ def get_akshare_insider_transactions(
     except Exception as e:
         logger.warning("AKShare insider transactions failed for %s: %s — using yfinance", ticker, e)
         from .y_finance import get_insider_transactions as _yf_insider
-        return _yf_insider(ticker)
+        return _yf_insider(_to_yf_symbol(ticker))
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -611,7 +620,7 @@ def fetch_price_history(symbol: str, start_date: str, end_date: str) -> Optional
 
         else:
             import yfinance as yf
-            df = yf.Ticker(symbol).history(start=start_date, end=end_date)
+            df = yf.Ticker(_to_yf_symbol(symbol)).history(start=start_date, end=end_date)
             if df.empty:
                 return None
             df = df.reset_index()[['Date', 'Close']]

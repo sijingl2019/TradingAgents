@@ -53,3 +53,6 @@ markers = [
 filterwarnings = [
     "ignore::DeprecationWarning",
 ]
+
+[tool.ruff.lint]
+ignore = ["E402", "F403"]
